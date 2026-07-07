@@ -67,7 +67,7 @@ scripts/
 
 - Python 3.9+ (3.10+ recommended)
 - Node 18+
-- A Gemini API key (`GEMINI_API_KEY`)
+- An OpenAI API key (`OPENAI_API_KEY`) for `gpt-image-2`
 - A SAM-3 segmentation server reachable over HTTP (`SAM_SERVER_URL`)
 - Optional: an Anthropic API key for the chat sidebar (`ANTHROPIC_API_KEY`)
 

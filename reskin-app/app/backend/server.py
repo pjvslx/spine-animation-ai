@@ -27,7 +27,7 @@ from PIL import Image
 
 from . import projects, secrets_store, settings as settings_mod
 from .ai import bria
-from .ai.gemini import GeminiProvider
+from .ai.openai_image import OpenAIImageProvider
 from .ai.sam_provider import SAMProvider
 from .imaging import SlotEdit, apply_edit
 from .logs import PipelineLogger
@@ -61,7 +61,7 @@ app.add_middleware(
 
 class _State:
     project: projects.Project | None = None
-    image_provider: GeminiProvider | None = None  # lazily constructed
+    image_provider: OpenAIImageProvider | None = None  # lazily constructed
 
     @classmethod
     def require_project(cls) -> projects.Project:
@@ -70,9 +70,9 @@ class _State:
         return cls.project
 
     @classmethod
-    def provider(cls) -> GeminiProvider:
+    def provider(cls) -> OpenAIImageProvider:
         if cls.image_provider is None:
-            cls.image_provider = GeminiProvider()
+            cls.image_provider = OpenAIImageProvider()
         return cls.image_provider
 
     @classmethod
@@ -159,7 +159,7 @@ async def project_snapshot(request: Request, skin_name: str = Query(...)):
     """Save a frontend canvas snapshot as the AI input for a specific skin.
 
     Saved to `.genie/snapshots/{skin_name}.png`. The reskin pipeline reads
-    this file as the source image for Gemini.
+    this file as the source image for the image provider.
     """
     project = _State.require_project()
     body = await request.body()
@@ -588,8 +588,8 @@ async def inpaint_slot(payload: InpaintSlotPayload):
     """Per-slot AI Terminal: redraw ONE slot's texture in the active skin.
 
     Takes the slot's current PNG (SAM-masked from the previous Generate, or
-    the original if this slot was never reskinned), sends it to Gemini with
-    a prompt to redraw matching the original silhouette, and writes the
+    the original if this slot was never reskinned), sends it to the image provider
+    with a prompt to redraw matching the original silhouette, and writes the
     result back. The atlas + per-skin Spine JSON are then re-packed/written
     so the canvas picks up the change without a full Generate.
     """
@@ -602,7 +602,7 @@ async def inpaint_slot(payload: InpaintSlotPayload):
     target = extracted_dir / f"{payload.slot}.png"
     if not target.exists():
         # Slot wasn't part of the original skin; seed it from the project's
-        # original part PNG so we have a starting point for Gemini.
+        # original part PNG so we have a starting point for the image provider.
         original = project.path / f"{payload.slot}.png"
         if not original.exists():
             raise HTTPException(
@@ -628,7 +628,7 @@ async def inpaint_slot(payload: InpaintSlotPayload):
 
     import time as _time
     t0 = _time.time()
-    gemini_meta: dict = {}
+    image_meta: dict = {}
     try:
         await _State.provider().edit_image(
             target,
@@ -638,42 +638,42 @@ async def inpaint_slot(payload: InpaintSlotPayload):
                 "do not add text or watermarks; do not crop the part"
             ),
             out_path=target,
-            metadata=gemini_meta,
+            metadata=image_meta,
         )
     except Exception as e:
-        padded_pil = gemini_meta.pop("padded_image_pil", None)
+        padded_pil = image_meta.pop("padded_image_pil", None)
         padded_snap = (
             logger.snapshot(padded_pil, f"inpaint_{payload.slot}_padded")
             if padded_pil is not None else None
         )
         logger.record(
-            "gemini_inpaint",
+            "image_inpaint",
             skin_name=payload.skin_name,
             slot=payload.slot,
-            params={"user_prompt": payload.prompt, **gemini_meta},
+            params={"user_prompt": payload.prompt, **image_meta},
             input_paths=[pre_inpaint, padded_snap],
             duration_ms=(_time.time() - t0) * 1000,
             status="error",
             error=str(e),
         )
         raise
-    padded_pil = gemini_meta.pop("padded_image_pil", None)
+    padded_pil = image_meta.pop("padded_image_pil", None)
     padded_snap = (
         logger.snapshot(padded_pil, f"inpaint_{payload.slot}_padded")
         if padded_pil is not None else None
     )
-    post_gemini = logger.snapshot(target, f"inpaint_{payload.slot}_gemini")
+    post_image = logger.snapshot(target, f"inpaint_{payload.slot}_image")
     logger.record(
-        "gemini_inpaint",
+        "image_inpaint",
         skin_name=payload.skin_name,
         slot=payload.slot,
-        params={"user_prompt": payload.prompt, **gemini_meta},
+        params={"user_prompt": payload.prompt, **image_meta},
         input_paths=[pre_inpaint, padded_snap],
-        output_paths=[post_gemini],
+        output_paths=[post_image],
         duration_ms=(_time.time() - t0) * 1000,
     )
 
-    # Strip whatever background Gemini still painted in. Gemini's prompt
+    # Strip whatever background the image provider still painted in. The prompt
     # asks for transparent/white but it's unreliable; Bria gives clean alpha.
     t1 = _time.time()
     bria_available = bria.available()
@@ -684,7 +684,7 @@ async def inpaint_slot(payload: InpaintSlotPayload):
         skin_name=payload.skin_name,
         slot=payload.slot,
         params={"available": bria_available},
-        input_paths=[post_gemini],
+        input_paths=[post_image],
         output_paths=[post_bria],
         duration_ms=(_time.time() - t1) * 1000,
         status="ok" if bria_available else "skipped",

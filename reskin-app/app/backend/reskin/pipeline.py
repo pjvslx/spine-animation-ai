@@ -148,7 +148,7 @@ async def full_reskin(
         pre_ref = pipeline_logger.snapshot(refs[0], f"reskin_{skin_name}_reference")
 
     t0 = _time.time()
-    gemini_meta: dict = {}
+    image_meta: dict = {}
     try:
         await image_provider.edit_image(
             composite_path,
@@ -156,17 +156,17 @@ async def full_reskin(
             negative_prompt=negative,
             out_path=reskinned_composite_path,
             reference_images=refs,
-            metadata=gemini_meta,
+            metadata=image_meta,
         )
     except Exception as e:
         if pipeline_logger is not None:
-            padded_pil = gemini_meta.pop("padded_image_pil", None)
+            padded_pil = image_meta.pop("padded_image_pil", None)
             padded_snap = (
                 pipeline_logger.snapshot(padded_pil, f"reskin_{skin_name}_padded")
                 if padded_pil is not None else None
             )
             pipeline_logger.record(
-                "gemini_full_reskin",
+                "image_full_reskin",
                 skin_name=skin_name,
                 params={
                     "method": method,
@@ -174,7 +174,7 @@ async def full_reskin(
                     "reference_used": bool(refs),
                     "reference_prompt": reference_prompt,
                     "negative_prompt": negative,
-                    **gemini_meta,
+                    **image_meta,
                 },
                 input_paths=[pre_ref, padded_snap],
                 duration_ms=(_time.time() - t0) * 1000,
@@ -184,21 +184,21 @@ async def full_reskin(
         raise
 
     if pipeline_logger is not None:
-        padded_pil = gemini_meta.pop("padded_image_pil", None)
+        padded_pil = image_meta.pop("padded_image_pil", None)
         padded_snap = (
             pipeline_logger.snapshot(padded_pil, f"reskin_{skin_name}_padded")
             if padded_pil is not None else None
         )
         post = pipeline_logger.snapshot(reskinned_composite_path, f"reskin_{skin_name}_output")
         pipeline_logger.record(
-            "gemini_full_reskin",
+            "image_full_reskin",
             skin_name=skin_name,
             params={
                 "method": method,
                 "user_prompt": user_prompt,
                 "reference_used": bool(refs),
                 "reference_prompt": reference_prompt,
-                **gemini_meta,
+                **image_meta,
             },
             input_paths=[pre_ref, padded_snap],
             output_paths=[post],

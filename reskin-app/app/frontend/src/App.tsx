@@ -22,6 +22,10 @@ export function App() {
   const [generateOpen, setGenerateOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
+  const [openProjectOpen, setOpenProjectOpen] = useState(false);
+  const [openProjectPath, setOpenProjectPath] = useState('D:\\Work\\Github\\spine-animation-ai\\examples\\sombrero');
+  const [openProjectError, setOpenProjectError] = useState<string | null>(null);
+  const [openingProject, setOpeningProject] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [pickerChoice, setPickerChoice] = useState<MultiProjectChoice | null>(null);
 
@@ -35,29 +39,35 @@ export function App() {
     refreshSecrets();
   }, [setProject, refreshSecrets]);
 
-  const onOpen = async () => {
-    const path = window.prompt(
-      'Path to a Spine project folder',
-      '/Users/yotamwolf/Downloads/spine_project_duckies/spine_test/benny',
-    );
-    if (!path) return;
+  const openProject = async (path: string) => {
+    setOpeningProject(true);
+    setOpenProjectError(null);
     try {
       const r = await api.openProject(path);
       if (isMultiProjectChoice(r)) {
         setPickerChoice(r);
+        setOpenProjectOpen(false);
         return;
       }
       setProject(r);
+      setOpenProjectOpen(false);
     } catch (e) {
-      alert(`open failed: ${(e as Error).message}`);
+      setOpenProjectError((e as Error).message);
+    } finally {
+      setOpeningProject(false);
     }
+  };
+
+  const onOpen = async () => {
+    setOpenProjectError(null);
+    setOpenProjectOpen(true);
   };
 
   return (
     <div className="app">
       <TopBar
         onOpen={onOpen}
-        onGenerate={() => { if (ensureSecrets(['GEMINI_API_KEY', 'FAL_KEY'], 'generate a look')) setGenerateOpen(true); }}
+        onGenerate={() => { if (ensureSecrets(['OPENAI_API_KEY', 'FAL_KEY'], 'generate a look')) setGenerateOpen(true); }}
         onSettings={() => setSettingsOpen(true)}
         onLogs={() => setLogsOpen(true)}
         onExport={async () => {
@@ -92,6 +102,47 @@ export function App() {
       )}
       {logsOpen && (
         <LogsModal onClose={() => setLogsOpen(false)} />
+      )}
+      {openProjectOpen && (
+        <div className="modal-backdrop" onClick={() => !openingProject && setOpenProjectOpen(false)}>
+          <form
+            className="modal"
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={(e) => {
+              e.preventDefault();
+              const path = openProjectPath.trim();
+              if (path) openProject(path);
+            }}
+          >
+            <header>
+              <h2>Open Project</h2>
+              <button type="button" onClick={() => setOpenProjectOpen(false)} disabled={openingProject}>×</button>
+            </header>
+            <div className="modal-body">
+              <label className="field">
+                <span>Spine project folder path</span>
+                <input
+                  type="text"
+                  value={openProjectPath}
+                  onChange={(e) => setOpenProjectPath(e.target.value)}
+                  placeholder="D:\\Work\\Github\\spine-animation-ai\\examples\\sombrero"
+                  autoFocus
+                />
+              </label>
+              {openProjectError && (
+                <div className="muted" style={{ color: 'var(--destructive)' }}>
+                  open failed: {openProjectError}
+                </div>
+              )}
+              <div className="actions">
+                <button type="button" onClick={() => setOpenProjectOpen(false)} disabled={openingProject}>Cancel</button>
+                <button className="primary" type="submit" disabled={openingProject || !openProjectPath.trim()}>
+                  {openingProject ? 'Opening…' : 'Open'}
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
       )}
       {pickerChoice && (
         <ProjectPickerModal

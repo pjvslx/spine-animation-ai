@@ -80,7 +80,7 @@ export function PartEditor() {
         <button
           className="ai-terminal-btn"
           onClick={() => {
-            if (useStore.getState().ensureSecrets(['GEMINI_API_KEY', 'FAL_KEY'], 'retouch a part')) {
+            if (useStore.getState().ensureSecrets(['OPENAI_API_KEY', 'FAL_KEY'], 'retouch a part')) {
               setAiOpen(true);
             }
           }}

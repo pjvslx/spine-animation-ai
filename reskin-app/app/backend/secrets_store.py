@@ -4,7 +4,7 @@ Secrets are stored in ~/.genie-reskin/secrets.json (the user's config dir,
 never in the repo). Precedence: a value saved there overrides the matching
 env var; if it isn't saved, the env var (e.g. from app/.env) *seeds* the
 field. `apply_to_env()` pushes the effective values into os.environ so the
-provider modules (gemini.py, bria.py, the SAM endpoints) — which read
+provider modules (OpenAI image, bria.py, the SAM endpoints) — which read
 os.environ — keep working unchanged.
 
 Nothing here is logged. The SAM server URL is the team's own infrastructure;
@@ -35,12 +35,12 @@ class SecretDef:
 # The single source of truth for which secrets the app surfaces.
 SECRET_DEFS: tuple[SecretDef, ...] = (
     SecretDef(
-        name="GEMINI_API_KEY",
-        label="Gemini API key",
+        name="OPENAI_API_KEY",
+        label="OpenAI API key",
         required=True,
         kind="key",
-        help_url="https://aistudio.google.com/app/apikey",
-        description="Powers every reskin and Retouch. Without it nothing generates.",
+        help_url="https://platform.openai.com/api-keys",
+        description="Powers every reskin and Retouch through gpt-image-2. Without it nothing generates.",
     ),
     SecretDef(
         name="FAL_KEY",
@@ -90,7 +90,7 @@ def effective(name: str) -> str:
 
 def _sync_env() -> None:
     """Make os.environ reflect the effective values so provider modules that
-    read os.environ (gemini.py, bria.py, the SAM endpoints) stay in sync."""
+    read os.environ (OpenAI image, bria.py, the SAM endpoints) stay in sync."""
     for d in SECRET_DEFS:
         val = effective(d.name)
         if val:
