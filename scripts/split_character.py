@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 split_character.py — Generate a sprite-sheet atlas from a full character image
-using Google Gemini image generation, then segment individual body parts via
+using OpenAI gpt-image-2 image editing, then segment individual body parts via
 OpenCV connected-components analysis.
 
 Usage:
@@ -10,37 +10,47 @@ Usage:
         [--bg-threshold 240]
 
 Requires:
-    pip install google-generativeai opencv-python Pillow numpy
-    Environment variable GEMINI_API_KEY must be set.
+    pip install requests opencv-python Pillow numpy
+    Environment variable OPENAI_API_KEY must be set.
 """
 
 import argparse
+import base64
 import os
 import sys
 
 import cv2
 import numpy as np
+import requests
 from PIL import Image
 
 
-def get_gemini_client():
-    """Initialise the Gemini generative-AI client, or exit with a helpful
-    error if the API key is missing."""
-    api_key = os.environ.get("GEMINI_API_KEY")
+def get_openai_config():
+    api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         print(
-            "ERROR: GEMINI_API_KEY environment variable is not set.\n"
-            "Get a free API key at: https://aistudio.google.com/app/apikey\n"
+            "ERROR: OPENAI_API_KEY environment variable is not set.\n"
+            "Get an API key at: https://platform.openai.com/api-keys\n"
             "Then run:\n"
-            "  export GEMINI_API_KEY=your_key_here",
+            "  set OPENAI_API_KEY=your_key_here",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    from google import genai
-
-    client = genai.Client(api_key=api_key)
-    return client
+    base_url = (
+        os.environ.get("OPENAI_IMAGE_API_URL")
+        or os.environ.get("OPENAI_BASE_URL")
+        or "https://api.openai.com/v1"
+    )
+    base_url = (
+        base_url.strip()
+        .rstrip("/")
+        .removesuffix("/images/generations")
+        .removesuffix("/images/edits")
+        .removesuffix("/chat/completions")
+        .rstrip("/")
+    )
+    return api_key, base_url
 
 
 POSITIVE_PROMPT = (
@@ -63,34 +73,71 @@ NEGATIVE_PROMPT = (
 )
 
 
-def generate_atlas(client, input_image_path: str, atlas_out: str) -> str:
-    """Send the reference image to Gemini and save the generated atlas PNG."""
-    from google.genai import types
+def _image_to_data_url(input_image_path: str) -> str:
+    with open(input_image_path, "rb") as f:
+        return "data:image/png;base64," + base64.b64encode(f.read()).decode("ascii")
 
-    ref_image = Image.open(input_image_path)
 
-    response = client.models.generate_content(
-        model="gemini-3.1-flash-image-preview",
-        contents=[
-            POSITIVE_PROMPT,
-            f"Negative prompt: {NEGATIVE_PROMPT}",
-            ref_image,
-        ],
-        config=types.GenerateContentConfig(
-            response_modalities=["IMAGE", "TEXT"],
-        ),
+def generate_atlas(config: tuple[str, str], input_image_path: str, atlas_out: str) -> str:
+    """Send the reference image to gpt-image-2 and save the generated atlas PNG."""
+    api_key, base_url = config
+    prompt = f"{POSITIVE_PROMPT}\n\nNegative prompt: {NEGATIVE_PROMPT}"
+    with Image.open(input_image_path) as im:
+        w, h = im.size
+    size = _normalize_size(max(1024, w), max(1024, h))
+
+    payload = {
+        "model": os.environ.get("OPENAI_IMAGE_MODEL", "gpt-image-2"),
+        "prompt": prompt,
+        "images": [{"image_url": _image_to_data_url(input_image_path)}],
+        "n": 1,
+        "size": f"{size[0]}x{size[1]}",
+        "output_format": "png",
+    }
+    r = requests.post(
+        f"{base_url}/images/edits",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=180,
     )
+    if not r.ok:
+        print(f"ERROR: OpenAI Image API failed: {r.status_code} {r.text}", file=sys.stderr)
+        sys.exit(1)
 
-    # Extract the generated image from the response parts
-    for part in response.candidates[0].content.parts:
-        if part.inline_data is not None:
-            image_data = part.inline_data.data
-            with open(atlas_out, "wb") as f:
-                f.write(image_data)
-            return atlas_out
+    data = r.json()
+    item = (data.get("data") or [None])[0]
+    if not item:
+        print("ERROR: OpenAI Image API returned no image data.", file=sys.stderr)
+        sys.exit(1)
 
-    print("ERROR: Gemini did not return an image in its response.", file=sys.stderr)
-    sys.exit(1)
+    if item.get("b64_json"):
+        image_data = base64.b64decode(item["b64_json"])
+    elif item.get("url"):
+        img = requests.get(item["url"], timeout=180)
+        if not img.ok:
+            print(f"ERROR: failed to download generated image: {img.status_code} {img.text}", file=sys.stderr)
+            sys.exit(1)
+        image_data = img.content
+    else:
+        print("ERROR: OpenAI Image API returned neither b64_json nor url.", file=sys.stderr)
+        sys.exit(1)
+
+    with open(atlas_out, "wb") as f:
+        f.write(image_data)
+    return atlas_out
+
+
+def _normalize_size(w: int, h: int) -> tuple[int, int]:
+    w = max(16, min(3840, int(round(w / 16) * 16)))
+    h = max(16, min(3840, int(round(h / 16) * 16)))
+    if w / h > 3:
+        w = min(w, h * 3)
+    elif h / w > 3:
+        h = min(h, w * 3)
+    return w, h
 
 
 def segment_parts(
@@ -165,7 +212,7 @@ def segment_parts(
 def main():
     parser = argparse.ArgumentParser(
         description="Generate a sprite atlas from a character image using "
-        "Gemini, then segment into individual body parts."
+        "gpt-image-2, then segment into individual body parts."
     )
     parser.add_argument("input_image", help="Path to the character reference image")
     parser.add_argument(
@@ -204,8 +251,8 @@ def main():
 
     # --- Step 1: Generate atlas ---
     print("[1/3] Generating atlas …")
-    client = get_gemini_client()
-    generate_atlas(client, args.input_image, args.atlas_out)
+    config = get_openai_config()
+    generate_atlas(config, args.input_image, args.atlas_out)
     print(f"      Atlas saved to {args.atlas_out}")
 
     # --- Step 2: Segment parts ---
