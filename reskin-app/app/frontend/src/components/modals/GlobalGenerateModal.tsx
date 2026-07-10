@@ -25,7 +25,7 @@ export function GlobalGenerateModal({ onClose }: { onClose: () => void }) {
     setBusy(true);
     try {
       // Snapshot upload is only required by the atlas method (which uses the
-      // canvas pose as Gemini's left-half reference). Exploded mode doesn't
+      // canvas pose as the image provider's left-half reference). Exploded mode doesn't
       // use it, but we still snapshot for the wipe-slider before-image.
       try {
         const snap = await snapshotCanvas();

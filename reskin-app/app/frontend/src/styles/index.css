@@ -159,6 +159,7 @@ textarea { resize: vertical; }
 /* ───── Canvas — the stage; fills the whole app, chrome floats above ───── */
 .canvas-wrap { position: absolute; inset: 0; z-index: 0; background: var(--canvas); }
 .pixi-container { width: 100%; height: 100%; }
+.canvas-status { position: absolute; left: 50%; bottom: var(--space-4); transform: translateX(-50%); z-index: 6; max-width: min(760px, 70vw); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 6px var(--space-3); border: 1px solid var(--charcoal-2); border-radius: var(--radius-full); background: color-mix(in srgb, var(--charcoal-0) 88%, transparent); color: var(--charcoal-5); font-size: var(--text-xs); box-shadow: var(--shadow-card); pointer-events: none; }
 .canvas-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--charcoal-4); font-size: var(--text-sm); pointer-events: none; }
 
 /* ───── Part editor — floating right panel (only when a part is selected) ───── */

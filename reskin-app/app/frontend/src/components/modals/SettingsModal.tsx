@@ -6,12 +6,12 @@ const METHODS: { value: ReskinMethod; title: string; body: string }[] = [
   {
     value: 'atlas',
     title: 'Atlas + snapshot',
-    body: 'Send Gemini the rendered character pose alongside the original packed atlas. Pose gives style context; atlas regions are reskinned in place, then segmented per region.',
+    body: 'Send the rendered character pose alongside the original packed atlas. Pose gives style context; atlas regions are reskinned in place, then segmented per region.',
   },
   {
     value: 'exploded',
     title: 'Exploded parts',
-    body: 'Bin-pack every part with 10 px gaps and send that to Gemini. No pose context, but each part is unambiguously isolated in the layout.',
+    body: 'Bin-pack every part with 10 px gaps and send that to the image provider. No pose context, but each part is unambiguously isolated in the layout.'
   },
 ];
 
@@ -259,7 +259,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           <div className="settings-section" style={{ marginTop: 'var(--space-5)' }}>
             <div className="settings-section-title">Mask erosion</div>
             <p className="settings-radio-body" style={{ margin: 0 }}>
-              Trims the soft halo Gemini paints at part edges by shrinking the SAM mask after segmentation. Radius scales with part size so thin features survive. Set values to 0 px to skip a tier.
+              Trims the soft halo the image provider paints at part edges by shrinking the mask after segmentation. Radius scales with part size so thin features survive. Set values to 0 px to skip a tier.
             </p>
             <label className="settings-radio" style={{ alignItems: 'center' }}>
               <input

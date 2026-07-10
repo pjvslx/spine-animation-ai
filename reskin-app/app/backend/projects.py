@@ -45,6 +45,57 @@ def _find_atlas_for_base(folder: Path, base: str) -> Path | None:
     return None
 
 
+def _atlas_sheet(atlas_path: Path) -> Path | None:
+    for line in atlas_path.read_text().splitlines():
+        line = line.strip()
+        if line:
+            sheet = atlas_path.parent / line
+            return sheet if sheet.exists() else None
+    return None
+
+
+def _extract_standard_atlas_parts(p: Path, spine_json_path: Path) -> None:
+    base = spine_json_path.stem
+    atlas_path = _find_atlas_for_base(p, base)
+    if atlas_path is None:
+        return
+    sheet_path = _atlas_sheet(atlas_path)
+    if sheet_path is None:
+        return
+
+    existing_parts = spine_parser.list_part_pngs(p)
+    if existing_parts:
+        return
+
+    from PIL import Image
+
+    lines = atlas_path.read_text().splitlines()
+    sheet = Image.open(sheet_path).convert("RGBA")
+    for idx, raw in enumerate(lines):
+        name = raw.strip()
+        if not name or ":" in name or raw.startswith((" ", "\t")) or name == sheet_path.name:
+            continue
+        xy = size = None
+        rotate = False
+        for detail in lines[idx + 1: idx + 8]:
+            d = detail.strip()
+            if d.startswith("rotate:"):
+                rotate = d.split(":", 1)[1].strip().lower() in {"true", "90"}
+            elif d.startswith("xy:"):
+                xy = [int(v.strip()) for v in d.split(":", 1)[1].split(",")]
+            elif d.startswith("size:"):
+                size = [int(v.strip()) for v in d.split(":", 1)[1].split(",")]
+        if xy is None or size is None:
+            continue
+        x, y = xy
+        w, h = size
+        crop_w, crop_h = (h, w) if rotate else (w, h)
+        crop = sheet.crop((x, y, x + crop_w, y + crop_h))
+        if rotate:
+            crop = crop.rotate(-90, expand=True)
+        crop.save(p / f"{name.replace('/', '_')}.png")
+
+
 def _maybe_auto_explode(p: Path, spine_json_path: Path) -> tuple[Path, Path]:
     """If `p` looks like a legacy packed-atlas project, explode it into a
     sibling `{name}-genie/` and return that as the new project root + its
@@ -223,6 +274,7 @@ def open_project(path: str | Path) -> Project:
     if not spine_json_path:
         raise FileNotFoundError(f"no Spine .json found in {p}")
     p, spine_json_path = _maybe_auto_explode(p, spine_json_path)
+    _extract_standard_atlas_parts(p, spine_json_path)
     spine_json = spine_parser.load_spine_json(spine_json_path)
     parts = spine_parser.list_part_pngs(p)
     slots = spine_parser.slots(spine_json)

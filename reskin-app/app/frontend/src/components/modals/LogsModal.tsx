@@ -16,11 +16,13 @@ type Filter = {
 
 const OPERATION_LABELS: Record<string, string> = {
   composite_build: 'Generate · Composite build',
-  gemini_inpaint: 'Retouch · Gemini',
+  gemini_inpaint: 'Retouch · Image provider',
+  image_inpaint: 'Retouch · Image provider',
   bria_remove_background: 'Retouch · Bria',
   atlas_repack: 'Retouch · Repack',
   mask_save: 'Mask save',
-  gemini_full_reskin: 'Generate · Gemini',
+  gemini_full_reskin: 'Generate · Image provider',
+  image_full_reskin: 'Generate · Image provider',
   segmentation_sam: 'Rebake · SAM',
   segmentation_bg_components: 'Rebake · BG components',
   region_mask_apply: 'Rebake · region mask',

@@ -15,7 +15,7 @@ function originalThumbUrl(project: Project, slotName: string): string {
     const attachmentKey = Object.keys(att)[0];
     if (attachmentKey) return api.fileUrl(`${attachmentKey}.png`);
   }
-  return api.fileUrl(`${slotName}.png`);
+  return '';
 }
 
 export function Sidebar() {
@@ -124,6 +124,7 @@ export function Sidebar() {
           const isHidden = hidden.has(slot.name);
           const isReverted = revertedForSkin.has(slot.name);
           const swapDisabled = activeSkin === 'default' || busy === slot.name || bulkBusy;
+          const thumb = thumbUrl(slot.name);
           return (
             <li
               key={slot.name}
@@ -131,12 +132,20 @@ export function Sidebar() {
               className={`slot ${isSel ? 'selected' : ''} ${isHidden ? 'hidden' : ''} ${isReverted ? 'reverted' : ''}`}
               onClick={() => select(slot.name)}
             >
-              <img
-                className="thumb"
-                src={thumbUrl(slot.name)}
-                alt={slot.name}
-                onError={(e) => ((e.target as HTMLImageElement).style.opacity = '0.2')}
-              />
+              {thumb ? (
+                <img
+                  className="thumb"
+                  src={thumb}
+                  alt={slot.name}
+                  onError={(e) => {
+                    const img = e.currentTarget;
+                    img.onerror = null;
+                    img.style.visibility = 'hidden';
+                  }}
+                />
+              ) : (
+                <div className="thumb thumb-fallback">{slot.name.slice(0, 1).toUpperCase()}</div>
+              )}
               <span className="slot-name">{slot.name}</span>
               <button
                 className={`icon-btn ${isReverted ? 'active' : ''}`}

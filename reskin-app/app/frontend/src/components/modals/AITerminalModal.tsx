@@ -7,7 +7,7 @@ import { api, type Project } from '../../api/client';
  * Redraws a single slot's texture without re-running a full Generate. On the
  * default look, the first retouch creates a fresh look (random name) from the
  * original part textures and switches into it, so the user keeps editing in
- * their own look. Backend pulls the slot's current PNG, sends it to Gemini with
+ * their own look. Backend pulls the slot's current PNG, sends it to the image provider with
  * a "redraw matching silhouette" prompt, repacks the atlas, and writes a fresh
  * per-skin Spine JSON. The canvas reload picks up the new texture.
  */

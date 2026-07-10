@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Application, Assets } from 'pixi.js';
+import { Application, Assets, Container, Rectangle, Sprite, Texture } from 'pixi.js';
 import { Spine } from '@esotericsoftware/spine-pixi-v8';
 import { useStore } from '../../state/store';
 import { api, type Project } from '../../api/client';
@@ -13,6 +13,107 @@ import { CanvasTools } from './CanvasTools';
 type SlotRect = { x: number; y: number; w: number; h: number };
 
 type AttOriginal = { x: number; y: number; rotation: number; scaleX: number; scaleY: number };
+
+function fitSpineToCanvas(spine: Spine, app: Application): string {
+  spine.scale.set(1);
+  spine.position.set(0, 0);
+  spine.update(0);
+
+  let bounds = spine.getBounds();
+  if (!Number.isFinite(bounds.width) || !Number.isFinite(bounds.height) || bounds.width <= 1 || bounds.height <= 1) {
+    spine.update(0.016);
+    bounds = spine.getBounds();
+  }
+
+  const padding = 40;
+  const canvasW = app.renderer.width || app.canvas.width || 1;
+  const canvasH = app.renderer.height || app.canvas.height || 1;
+  const availableW = Math.max(1, canvasW - padding * 2);
+  const availableH = Math.max(1, canvasH - padding * 2);
+  const scale = Math.min(availableW / Math.max(1, bounds.width), availableH / Math.max(1, bounds.height));
+
+  spine.scale.set(scale);
+  spine.x = canvasW / 2 - (bounds.x + bounds.width / 2) * scale;
+  spine.y = canvasH / 2 - (bounds.y + bounds.height / 2) * scale;
+  spine.update(0);
+
+  return `${Math.round(bounds.width)}x${Math.round(bounds.height)} @ ${scale.toFixed(3)}`;
+}
+
+async function renderStaticSetupPose(
+  project: Project,
+  app: Application,
+  spineJsonName = project.spine_json,
+  atlasName = project.atlas,
+): Promise<string> {
+  if (!spineJsonName || !atlasName) throw new Error('missing spine json or atlas');
+  const [json, atlasText] = await Promise.all([
+    fetch(api.fileUrl(spineJsonName)).then((r) => r.json()),
+    fetch(api.fileUrl(atlasName)).then((r) => r.text()),
+  ]);
+  const lines = atlasText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const pageName = lines[0];
+  const pageTexture = await Assets.load<Texture>(api.fileUrl(pageName));
+  const regions = new Map<string, { x: number; y: number; w: number; h: number }>();
+  for (let i = 1; i < lines.length; i += 1) {
+    const name = lines[i];
+    const xy = lines[i + 2]?.match(/^xy:\s*(\d+)\s*,\s*(\d+)/);
+    const size = lines[i + 3]?.match(/^size:\s*(\d+)\s*,\s*(\d+)/);
+    if (xy && size) {
+      regions.set(name, { x: Number(xy[1]), y: Number(xy[2]), w: Number(size[1]), h: Number(size[2]) });
+      i += 6;
+    }
+  }
+
+  const bones = new Map<string, { x: number; y: number; rotation: number }>();
+  for (const bone of json.bones ?? []) {
+    const parent = bone.parent ? bones.get(bone.parent) : null;
+    const parentRot = parent?.rotation ?? 0;
+    const rad = parentRot * Math.PI / 180;
+    const lx = Number(bone.x ?? 0);
+    const ly = Number(bone.y ?? 0);
+    bones.set(bone.name, {
+      x: (parent?.x ?? 0) + lx * Math.cos(rad) - ly * Math.sin(rad),
+      y: (parent?.y ?? 0) + lx * Math.sin(rad) + ly * Math.cos(rad),
+      rotation: parentRot + Number(bone.rotation ?? 0),
+    });
+  }
+
+  const skin = (json.skins ?? []).find((s: any) => s.name === 'default') ?? json.skins?.[0];
+  const root = new Container();
+  const slots = json.slots ?? [];
+  for (const slot of slots) {
+    const slotAtts = skin?.attachments?.[slot.name];
+    const attName = slot.attachment ?? Object.keys(slotAtts ?? {})[0];
+    const att = slotAtts?.[attName];
+    const region = regions.get(attName);
+    const bone = bones.get(slot.bone);
+    if (!att || !region || !bone) continue;
+
+    const texture = new Texture({ source: pageTexture.source, frame: new Rectangle(region.x, region.y, region.w, region.h) });
+    const sprite = new Sprite(texture);
+    sprite.anchor.set(0.5);
+    sprite.x = bone.x + Number(att.x ?? 0);
+    sprite.y = -(bone.y + Number(att.y ?? 0));
+    sprite.rotation = -(bone.rotation + Number(att.rotation ?? 0)) * Math.PI / 180;
+    sprite.scale.set(Number(att.scaleX ?? 1), Number(att.scaleY ?? 1));
+    root.addChild(sprite);
+  }
+
+  app.stage.addChild(root);
+  const bounds = root.getLocalBounds();
+  const padding = 40;
+  const canvasW = app.renderer.width || app.canvas.width || 1;
+  const canvasH = app.renderer.height || app.canvas.height || 1;
+  const scale = Math.min(
+    Math.max(1, canvasW - padding * 2) / Math.max(1, bounds.width),
+    Math.max(1, canvasH - padding * 2) / Math.max(1, bounds.height),
+  );
+  root.scale.set(scale);
+  root.x = canvasW / 2 - (bounds.x + bounds.width / 2) * scale;
+  root.y = canvasH / 2 - (bounds.y + bounds.height / 2) * scale;
+  return `static fallback ${Math.round(bounds.width)}x${Math.round(bounds.height)} @ ${scale.toFixed(3)}`;
+}
 
 function snapshotOriginalAtt(spine: Spine): Map<string, AttOriginal> {
   const out = new Map<string, AttOriginal>();
@@ -139,6 +240,8 @@ export function SpineCanvas() {
   const dragRef = useRef<DragState | null>(null);
   const [ready, setReady] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadedLabel, setLoadedLabel] = useState<string | null>(null);
   const project = useStore((s) => s.project);
   const activeSkin = useStore((s) => s.activeSkin);
   const activeAnimation = useStore((s) => s.activeAnimation);
@@ -195,6 +298,8 @@ export function SpineCanvas() {
     let cancelled = false;
     const stage = app.stage;
     stage.removeChildren();
+    setLoadError(null);
+    setLoadedLabel(null);
     spineRef.current = null;
     registerSpine(null);
     defaultAttachmentsRef.current = new Map();
@@ -238,15 +343,16 @@ export function SpineCanvas() {
             if (initialAnim) {
               spine.state.setAnimation(0, initialAnim, true);
             }
-            const bounds = spine.getBounds();
-            const padding = 40;
-            const sw = app.canvas.width - padding * 2;
-            const sh = app.canvas.height - padding * 2;
-            const scale = Math.min(sw / Math.max(1, bounds.width), sh / Math.max(1, bounds.height));
-            spine.scale.set(scale);
-            spine.x = app.canvas.width / 2 - (bounds.x + bounds.width / 2) * scale;
-            spine.y = app.canvas.height / 2 - (bounds.y + bounds.height / 2) * scale;
             stage.addChild(spine);
+            const fitInfo = fitSpineToCanvas(spine, app);
+            if (fitInfo.startsWith('0x0')) {
+              stage.removeChild(spine);
+              spineRef.current = null;
+              registerSpine(null);
+              const fallbackInfo = await renderStaticSetupPose(project, app, skinJsonName, skinAtlasName);
+              setLoadedLabel(`${skinJsonName} / ${skinAtlasName} · ${fallbackInfo}`);
+              return;
+            }
             originalAttachmentXYRef.current = snapshotOriginalAtt(spine);
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             (window as any).__origMap = originalAttachmentXYRef.current;
@@ -259,9 +365,11 @@ export function SpineCanvas() {
             );
             spine.update(0);
             slotRectsRef.current = computeAllSlotRects(spine);
+            setLoadedLabel(`${skinJsonName} / ${skinAtlasName} · ${fitInfo}`);
             return;
           } catch (e) {
             console.warn('per-skin spine load failed', e);
+            setLoadError(`Generated skin preview failed: ${(e as Error).message}`);
           }
         }
       }
@@ -312,15 +420,16 @@ export function SpineCanvas() {
           }
 
           // Center & fit
-          const bounds = spine.getBounds();
-          const padding = 40;
-          const sw = app.canvas.width - padding * 2;
-          const sh = app.canvas.height - padding * 2;
-          const scale = Math.min(sw / Math.max(1, bounds.width), sh / Math.max(1, bounds.height));
-          spine.scale.set(scale);
-          spine.x = app.canvas.width / 2 - (bounds.x + bounds.width / 2) * scale;
-          spine.y = app.canvas.height / 2 - (bounds.y + bounds.height / 2) * scale;
           stage.addChild(spine);
+          const fitInfo = fitSpineToCanvas(spine, app);
+          if (fitInfo.startsWith('0x0')) {
+            stage.removeChild(spine);
+            spineRef.current = null;
+            registerSpine(null);
+            const fallbackInfo = await renderStaticSetupPose(project, app);
+            setLoadedLabel(`${project.spine_json} / ${project.atlas} · ${fallbackInfo}`);
+            return;
+          }
           originalAttachmentXYRef.current = snapshotOriginalAtt(spine);
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (window as any).__origMap = originalAttachmentXYRef.current;
@@ -331,10 +440,14 @@ export function SpineCanvas() {
           );
           spine.update(0);
           slotRectsRef.current = computeAllSlotRects(spine);
+          setLoadedLabel(`${project.spine_json} / ${project.atlas} · ${fitInfo}`);
           return;
         } catch (e) {
           console.warn('spine-pixi load failed', e);
+          setLoadError(`Spine preview failed: ${(e as Error).message}`);
         }
+      } else {
+        setLoadError('Project has no atlas file, so it cannot be rendered in the Spine preview.');
       }
     })();
 
@@ -679,7 +792,19 @@ export function SpineCanvas() {
   return (
     <div className={wrapClass}>
       <div ref={containerRef} className="pixi-container" />
+      {project && (
+        <div className="canvas-status">
+          {loadError ? 'Preview failed' : loadedLabel ? `Preview loaded: ${loadedLabel}` : ready ? 'Loading preview…' : 'Initializing canvas…'}
+        </div>
+      )}
       {project && <CanvasTools />}
+      {project && loadError && (
+        <div className="canvas-empty">
+          <strong>Preview failed</strong>
+          <br />
+          {loadError}
+        </div>
+      )}
       {!project && <div className="canvas-empty">Open a project to begin.</div>}
     </div>
   );
